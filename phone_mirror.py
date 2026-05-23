@@ -4,6 +4,7 @@ import json
 import os
 import queue
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -11,7 +12,7 @@ import threading
 import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath
-from tkinter import BooleanVar, StringVar, Text, Tk
+from tkinter import BooleanVar, StringVar, Text, Tk, filedialog
 from tkinter import ttk
 
 
@@ -20,6 +21,15 @@ TOOLS_DIR = APP_DIR / "tools"
 DOWNLOADS_DIR = APP_DIR / "downloads"
 GITHUB_API = "https://api.github.com/repos/Genymobile/scrcpy/releases/latest"
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+DEFAULT_PUSH_TARGET = "/sdcard/Download/"
+COMMON_PUSH_TARGETS = (
+    "/sdcard/Download/",
+    "/sdcard/Documents/",
+    "/sdcard/Pictures/",
+    "/sdcard/Movies/",
+    "/sdcard/Music/",
+    "/sdcard/DCIM/",
+)
 
 
 def run_command(args: list[str], timeout: int = 20, cwd: Path | None = None) -> tuple[int, str, str]:
@@ -85,6 +95,17 @@ def parse_adb_devices(output: str) -> list[tuple[str, str]]:
     return devices
 
 
+def normalize_android_dir(value: str) -> str:
+    target = value.strip().replace("\\", "/")
+    if not target:
+        target = DEFAULT_PUSH_TARGET
+    if not target.startswith("/"):
+        target = f"/sdcard/{target.lstrip('/')}"
+    if not target.endswith("/"):
+        target += "/"
+    return target
+
+
 def safe_extract(zip_path: Path, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     destination_root = destination.resolve()
@@ -106,7 +127,7 @@ class MirrorApp:
     def __init__(self, root: Tk) -> None:
         self.root = root
         self.root.title("Espelhador USB Android")
-        self.root.minsize(760, 520)
+        self.root.minsize(900, 560)
 
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.process: subprocess.Popen[str] | None = None
@@ -115,6 +136,7 @@ class MirrorApp:
         self.status_var = StringVar(value="Pronto")
         self.max_size_var = StringVar(value="1080")
         self.bitrate_var = StringVar(value="8M")
+        self.push_target_var = StringVar(value=DEFAULT_PUSH_TARGET)
         self.no_audio_var = BooleanVar(value=True)
         self.view_only_var = BooleanVar(value=False)
         self.game_mouse_var = BooleanVar(value=False)
@@ -145,14 +167,15 @@ class MirrorApp:
 
         actions = ttk.Frame(outer)
         actions.grid(row=2, column=0, sticky="ew", pady=(0, 12))
-        for column in range(5):
+        for column in range(6):
             actions.columnconfigure(column, weight=1)
 
         self.add_button(actions, "Verificar celular", self.check_phone_clicked, 0)
         self.add_button(actions, "Baixar/atualizar scrcpy", self.download_clicked, 1)
         self.add_button(actions, "Iniciar espelhamento", self.start_clicked, 2)
-        self.add_button(actions, "Parar", self.stop_clicked, 3)
-        self.add_button(actions, "Abrir pasta", self.open_folder_clicked, 4)
+        self.add_button(actions, "Enviar arquivo", self.send_file_clicked, 3)
+        self.add_button(actions, "Parar", self.stop_clicked, 4)
+        self.add_button(actions, "Abrir pasta", self.open_folder_clicked, 5)
 
         body = ttk.Frame(outer)
         body.grid(row=3, column=0, sticky="nsew")
@@ -198,6 +221,17 @@ class MirrorApp:
         ttk.Checkbutton(options, text="Tela cheia", variable=self.fullscreen_var).grid(
             row=8, column=0, sticky="w", pady=3
         )
+
+        ttk.Separator(options).grid(row=9, column=0, sticky="ew", pady=(14, 10))
+        ttk.Label(options, text="Destino no celular").grid(row=10, column=0, sticky="w")
+        push_target = ttk.Combobox(
+            options,
+            textvariable=self.push_target_var,
+            values=COMMON_PUSH_TARGETS,
+            width=26,
+        )
+        push_target.grid(row=11, column=0, sticky="ew", pady=(2, 0))
+        options.columnconfigure(0, weight=1)
 
         log_frame = ttk.LabelFrame(body, text="Registro", padding=8)
         log_frame.grid(row=0, column=1, sticky="nsew")
@@ -282,6 +316,16 @@ class MirrorApp:
         }
         self.run_background(lambda: self.start_mirror(options))
 
+    def send_file_clicked(self) -> None:
+        paths = filedialog.askopenfilenames(title="Escolha arquivo(s) para enviar ao celular")
+        if not paths:
+            return
+
+        target_dir = normalize_android_dir(self.push_target_var.get())
+        self.push_target_var.set(target_dir)
+        files = [Path(path) for path in paths]
+        self.run_background(lambda: self.send_files(files, target_dir))
+
     def stop_clicked(self) -> None:
         process = self.process
         if process and process.poll() is None:
@@ -350,6 +394,54 @@ class MirrorApp:
         if code != 0:
             return ""
         return stdout.strip()
+
+    def send_files(self, files: list[Path], target_dir: str) -> None:
+        self.set_busy(True)
+        try:
+            _, adb_path = self.ensure_paths()
+            if not adb_path:
+                self.log("ADB não encontrado. Baixe o scrcpy primeiro.")
+                return
+
+            devices = self.check_devices_without_busy(adb_path)
+            ready = [serial for serial, state in devices if state == "device"]
+            if not ready:
+                self.log("Não há celular autorizado para receber arquivo.")
+                return
+            if len(ready) > 1:
+                self.log(f"Mais de um celular conectado; usando {ready[0]}.")
+
+            serial = ready[0]
+            target_dir = normalize_android_dir(target_dir)
+            mkdir_target = target_dir.rstrip("/") or "/"
+            self.log(f"Criando destino no celular: {target_dir}")
+            mkdir_code, _, mkdir_err = run_command(
+                [str(adb_path), "-s", serial, "shell", f"mkdir -p {shlex.quote(mkdir_target)}"],
+                timeout=30,
+            )
+            if mkdir_code != 0:
+                self.log(mkdir_err or "Não foi possível criar a pasta no celular.")
+                return
+
+            for local_file in files:
+                if not local_file.exists() or not local_file.is_file():
+                    self.log(f"Arquivo inválido: {local_file}")
+                    continue
+
+                self.log(f"Enviando {local_file.name} para {target_dir}")
+                code, stdout, stderr = run_command(
+                    [str(adb_path), "-s", serial, "push", str(local_file), target_dir],
+                    timeout=60 * 30,
+                )
+                output = stderr or stdout
+                if code == 0:
+                    self.log(f"Arquivo enviado: {local_file.name}")
+                    if output:
+                        self.log(output)
+                else:
+                    self.log(f"Falha ao enviar {local_file.name}: {output or 'erro desconhecido'}")
+        finally:
+            self.set_busy(False)
 
     def download_scrcpy(self) -> None:
         self.set_busy(True)

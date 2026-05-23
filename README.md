@@ -12,6 +12,7 @@ O projeto usa [`scrcpy`](https://github.com/Genymobile/scrcpy) e `adb` por baixo
 - Verifica se o celular aparece no `adb`.
 - Tem modo normal, modo somente visualização e modo jogo.
 - Inclui opção para tela cheia, bitrate e tamanho máximo do vídeo.
+- Envia arquivos do PC para uma pasta escolhida no celular.
 
 ## Requisitos
 
@@ -36,6 +37,29 @@ O projeto usa [`scrcpy`](https://github.com/Genymobile/scrcpy) e `adb` por baixo
 9. Clique em **Iniciar espelhamento**.
 
 Com **Somente ver** desligado, o controle por mouse e teclado fica ativo.
+
+## Enviar arquivos para o celular
+
+Você pode enviar arquivos do PC para o Android de duas formas:
+
+- Arraste um arquivo para a janela do espelhamento. Por padrão, o `scrcpy` envia arquivos comuns para `/sdcard/Download/` e instala arquivos `.apk`.
+- Use o botão **Enviar arquivo** no app para escolher o arquivo e também a pasta de destino no celular.
+
+Para escolher a pasta pelo app:
+
+1. No campo **Destino no celular**, escolha ou digite uma pasta.
+2. Clique em **Enviar arquivo**.
+3. Escolha o arquivo no Windows.
+4. Aguarde a mensagem de envio concluído no registro.
+
+Destinos úteis:
+
+- `/sdcard/Download/`: Downloads.
+- `/sdcard/Documents/`: Documentos.
+- `/sdcard/Pictures/`: Imagens.
+- `/sdcard/Movies/`: Vídeos.
+- `/sdcard/Music/`: Músicas.
+- `/sdcard/DCIM/`: Câmera/galeria.
 
 ## Modo jogo
 
@@ -62,6 +86,7 @@ Se o cursor ficar preso na janela do espelhamento, pressione `Alt` ou a tecla `W
 - **Modo jogo**: usa mouse e teclado como dispositivos físicos.
 - **Manter acordado**: evita que o celular apague a tela durante o uso.
 - **Tela cheia**: abre o espelhamento em tela cheia.
+- **Destino no celular**: pasta usada pelo botão **Enviar arquivo**.
 
 ## Problemas comuns
 
@@ -80,9 +105,16 @@ Desbloqueie o celular e aceite a janela **Permitir depuração USB**. Se não ap
 
 Marque **Modo jogo** e inicie o espelhamento novamente. O jogo também precisa ter suporte a mouse/teclado físico.
 
-### O espelhamento esta travando
+### O espelhamento está travando
 
-Use tamanho maximo `720` e bitrate `4M` ou `2M`.
+Use tamanho máximo `720` e bitrate `4M` ou `2M`.
+
+### O arquivo não aparece no celular
+
+- Abra o app **Arquivos** ou **Downloads** no Android.
+- Confirme que o destino está correto, por exemplo `/sdcard/Download/`.
+- Se for imagem ou vídeo, pode demorar alguns segundos para aparecer na galeria.
+- Verifique se o celular continua autorizado no ADB.
 
 ## Estrutura
 
@@ -91,7 +123,7 @@ Use tamanho maximo `720` e bitrate `4M` ou `2M`.
 - `tools/`: pasta criada automaticamente para guardar o `scrcpy` baixado.
 - `downloads/`: pasta criada automaticamente para guardar downloads temporários.
 
-As pastas `tools/` e `downloads/` nao entram no Git, porque podem conter arquivos grandes baixados automaticamente.
+As pastas `tools/` e `downloads/` não entram no Git, porque podem conter arquivos grandes baixados automaticamente.
 
 ## Licença
 
