@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -22,6 +23,7 @@ DOWNLOADS_DIR = APP_DIR / "downloads"
 GITHUB_API = "https://api.github.com/repos/Genymobile/scrcpy/releases/latest"
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 DEFAULT_PUSH_TARGET = "/sdcard/Download/"
+DEFAULT_TCPIP_PORT = "5555"
 COMMON_PUSH_TARGETS = (
     "/sdcard/Download/",
     "/sdcard/Documents/",
@@ -106,6 +108,32 @@ def normalize_android_dir(value: str) -> str:
     return target
 
 
+def normalize_tcpip_target(value: str) -> str:
+    target = value.strip().replace(" ", "")
+    if not target:
+        return ""
+
+    for prefix in ("tcp://", "adb://"):
+        if target.lower().startswith(prefix):
+            target = target[len(prefix) :]
+
+    reconnect = ""
+    if target.startswith("+"):
+        reconnect = "+"
+        target = target[1:]
+
+    if not target:
+        return ""
+    if ":" not in target:
+        target = f"{target}:{DEFAULT_TCPIP_PORT}"
+    return f"{reconnect}{target}"
+
+
+def extract_ipv4_from_route(output: str) -> str:
+    match = re.search(r"\bsrc\s+((?:\d{1,3}\.){3}\d{1,3})\b", output)
+    return match.group(1) if match else ""
+
+
 def safe_extract(zip_path: Path, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     destination_root = destination.resolve()
@@ -137,6 +165,8 @@ class MirrorApp:
         self.max_size_var = StringVar(value="1080")
         self.bitrate_var = StringVar(value="8M")
         self.push_target_var = StringVar(value=DEFAULT_PUSH_TARGET)
+        self.network_address_var = StringVar(value="")
+        self.network_enabled_var = BooleanVar(value=False)
         self.no_audio_var = BooleanVar(value=True)
         self.view_only_var = BooleanVar(value=False)
         self.game_mouse_var = BooleanVar(value=False)
@@ -231,6 +261,22 @@ class MirrorApp:
             width=26,
         )
         push_target.grid(row=11, column=0, sticky="ew", pady=(2, 0))
+
+        ttk.Separator(options).grid(row=12, column=0, sticky="ew", pady=(14, 10))
+        ttk.Checkbutton(options, text="Via rede/Wi-Fi", variable=self.network_enabled_var).grid(
+            row=13, column=0, sticky="w", pady=3
+        )
+        ttk.Label(options, text="IP:porta (opcional)").grid(row=14, column=0, sticky="w")
+        network_address = ttk.Entry(options, textvariable=self.network_address_var, width=26)
+        network_address.grid(row=15, column=0, sticky="ew", pady=(2, 8))
+        prepare_network = ttk.Button(
+            options,
+            text="Preparar rede",
+            command=self.prepare_network_clicked,
+        )
+        prepare_network.grid(row=16, column=0, sticky="ew")
+        self.buttons.append(prepare_network)
+
         options.columnconfigure(0, weight=1)
 
         log_frame = ttk.LabelFrame(body, text="Registro", padding=8)
@@ -270,6 +316,10 @@ class MirrorApp:
             elif kind == "busy":
                 self.busy = bool(payload)
                 self.refresh_buttons()
+            elif kind == "network_target":
+                address = str(payload)
+                self.network_enabled_var.set(True)
+                self.network_address_var.set(address)
         self.root.after(100, self.poll_events)
 
     def log(self, message: str) -> None:
@@ -308,6 +358,8 @@ class MirrorApp:
         options = {
             "max_size": self.max_size_var.get(),
             "bitrate": self.bitrate_var.get(),
+            "network_enabled": self.network_enabled_var.get(),
+            "network_address": self.network_address_var.get(),
             "no_audio": self.no_audio_var.get(),
             "view_only": self.view_only_var.get(),
             "game_mouse": self.game_mouse_var.get(),
@@ -316,15 +368,29 @@ class MirrorApp:
         }
         self.run_background(lambda: self.start_mirror(options))
 
+    def prepare_network_clicked(self) -> None:
+        self.run_background(self.prepare_network)
+
     def send_file_clicked(self) -> None:
         paths = filedialog.askopenfilenames(title="Escolha arquivo(s) para enviar ao celular")
         if not paths:
             return
 
         target_dir = normalize_android_dir(self.push_target_var.get())
+        network_address = normalize_tcpip_target(self.network_address_var.get())
+        network_enabled = self.network_enabled_var.get()
         self.push_target_var.set(target_dir)
+        if network_address:
+            self.network_address_var.set(network_address)
         files = [Path(path) for path in paths]
-        self.run_background(lambda: self.send_files(files, target_dir))
+        self.run_background(
+            lambda: self.send_files(
+                files,
+                target_dir,
+                network_enabled,
+                network_address,
+            )
+        )
 
     def stop_clicked(self) -> None:
         process = self.process
@@ -395,13 +461,86 @@ class MirrorApp:
             return ""
         return stdout.strip()
 
-    def send_files(self, files: list[Path], target_dir: str) -> None:
+    def prepare_network(self) -> None:
         self.set_busy(True)
         try:
             _, adb_path = self.ensure_paths()
             if not adb_path:
                 self.log("ADB não encontrado. Baixe o scrcpy primeiro.")
                 return
+
+            devices = self.check_devices_without_busy(adb_path)
+            ready_usb = [
+                serial
+                for serial, state in devices
+                if state == "device" and ":" not in serial
+            ]
+            if not ready_usb:
+                self.log("Conecte o celular por USB para preparar o modo rede.")
+                self.log("O celular e o PC precisam estar no mesmo Wi-Fi.")
+                return
+
+            serial = ready_usb[0]
+            self.log("Buscando IP do celular no Wi-Fi...")
+            route_code, route_stdout, route_stderr = run_command(
+                [str(adb_path), "-s", serial, "shell", "ip route"],
+                timeout=10,
+            )
+            if route_code != 0:
+                self.log(route_stderr or route_stdout or "Não consegui ler o IP do celular.")
+                return
+
+            ip_address = extract_ipv4_from_route(route_stdout)
+            if not ip_address:
+                self.log("Não consegui encontrar o IP do celular. Confira se ele está no Wi-Fi.")
+                return
+
+            target = f"{ip_address}:{DEFAULT_TCPIP_PORT}"
+            self.log(f"Ativando ADB por rede em {target}...")
+            tcp_code, tcp_stdout, tcp_stderr = run_command(
+                [str(adb_path), "-s", serial, "tcpip", DEFAULT_TCPIP_PORT],
+                timeout=20,
+            )
+            if tcp_code != 0:
+                self.log(tcp_stderr or tcp_stdout or "Não foi possível ativar ADB por rede.")
+                return
+
+            if tcp_stdout:
+                self.log(tcp_stdout)
+            time.sleep(2)
+
+            self.log(f"Conectando ao celular pela rede: {target}")
+            connect_code, connect_stdout, connect_stderr = run_command(
+                [str(adb_path), "connect", target],
+                timeout=20,
+            )
+            if connect_code == 0:
+                self.events.put(("network_target", target))
+                self.log(connect_stdout or f"Conectado em {target}.")
+                self.log("Agora você pode desconectar o cabo e iniciar com 'Via rede/Wi-Fi'.")
+            else:
+                self.events.put(("network_target", target))
+                self.log(connect_stderr or connect_stdout or "A conexão por rede não respondeu.")
+                self.log("O endereço foi preenchido mesmo assim; tente iniciar via rede.")
+        finally:
+            self.set_busy(False)
+
+    def send_files(
+        self,
+        files: list[Path],
+        target_dir: str,
+        network_enabled: bool,
+        network_address: str,
+    ) -> None:
+        self.set_busy(True)
+        try:
+            _, adb_path = self.ensure_paths()
+            if not adb_path:
+                self.log("ADB não encontrado. Baixe o scrcpy primeiro.")
+                return
+
+            if network_enabled and network_address:
+                self.connect_network_device(adb_path, network_address)
 
             devices = self.check_devices_without_busy(adb_path)
             ready = [serial for serial, state in devices if state == "device"]
@@ -442,6 +581,22 @@ class MirrorApp:
                     self.log(f"Falha ao enviar {local_file.name}: {output or 'erro desconhecido'}")
         finally:
             self.set_busy(False)
+
+    def connect_network_device(self, adb_path: Path, network_address: str) -> None:
+        target = normalize_tcpip_target(network_address)
+        if not target:
+            return
+
+        self.log(f"Conectando via rede: {target}")
+        code, stdout, stderr = run_command(
+            [str(adb_path), "connect", target.lstrip("+")],
+            timeout=20,
+        )
+        output = stdout or stderr
+        if output:
+            self.log(output)
+        if code != 0:
+            self.log("Não consegui conectar pela rede; vou tentar usar dispositivos já conectados.")
 
     def download_scrcpy(self) -> None:
         self.set_busy(True)
@@ -546,14 +701,31 @@ class MirrorApp:
                 self.log("scrcpy não encontrado. Use o botão de download primeiro.")
                 return
 
-            if adb_path:
+            network_enabled = bool(options["network_enabled"])
+            network_address = normalize_tcpip_target(str(options["network_address"]))
+            if network_address:
+                self.events.put(("network_target", network_address))
+
+            if adb_path and not (network_enabled and network_address):
                 devices = self.check_devices_without_busy(adb_path)
                 ready = [serial for serial, state in devices if state == "device"]
                 if not ready:
-                    self.log("Não há celular autorizado para iniciar o espelhamento.")
+                    if network_enabled:
+                        self.log("Para via rede automática, conecte o celular por USB primeiro.")
+                    else:
+                        self.log("Não há celular autorizado para iniciar o espelhamento.")
                     return
 
-            args = [str(scrcpy_path), "--window-title", "Celular via USB"]
+            window_title = "Celular via rede" if network_enabled else "Celular via USB"
+            args = [str(scrcpy_path), "--window-title", window_title]
+
+            if network_enabled:
+                if network_address:
+                    args.append(f"--tcpip={network_address}")
+                    self.log(f"Espelhamento via rede: {network_address}")
+                else:
+                    args.append("--tcpip")
+                    self.log("Espelhamento via rede automático: mantenha o celular no USB para configurar.")
 
             max_size = str(options["max_size"])
             if max_size and max_size != "0":

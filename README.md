@@ -13,6 +13,7 @@ O projeto usa [`scrcpy`](https://github.com/Genymobile/scrcpy) e `adb` por baixo
 - Tem modo normal, modo somente visualização e modo jogo.
 - Inclui opção para tela cheia, bitrate e tamanho máximo do vídeo.
 - Envia arquivos do PC para uma pasta escolhida no celular.
+- Espelha via USB ou via rede/Wi-Fi.
 
 ## Requisitos
 
@@ -37,6 +38,31 @@ O projeto usa [`scrcpy`](https://github.com/Genymobile/scrcpy) e `adb` por baixo
 9. Clique em **Iniciar espelhamento**.
 
 Com **Somente ver** desligado, o controle por mouse e teclado fica ativo.
+
+## Espelhar via rede/Wi-Fi
+
+O celular e o PC precisam estar na mesma rede. Na maioria dos aparelhos, a primeira configuração ainda precisa do cabo USB.
+
+### Modo automático
+
+1. Conecte o celular por USB.
+2. Confirme que a depuração USB está autorizada.
+3. Marque **Via rede/Wi-Fi**.
+4. Deixe **IP:porta** vazio.
+5. Clique em **Iniciar espelhamento**.
+
+O `scrcpy` vai tentar encontrar o IP do celular, ativar o ADB por rede e iniciar o espelhamento. Depois que a janela abrir, você pode desconectar o cabo.
+
+### Preparar e conectar por IP
+
+1. Conecte o celular por USB.
+2. Marque **Via rede/Wi-Fi**.
+3. Clique em **Preparar rede**.
+4. O app tenta preencher o campo **IP:porta**, por exemplo `192.168.1.50:5555`.
+5. Desconecte o cabo USB.
+6. Clique em **Iniciar espelhamento**.
+
+Se você já sabe o IP do celular, pode digitar direto em **IP:porta**. Se digitar só o IP, o app usa a porta `5555`.
 
 ## Enviar arquivos para o celular
 
@@ -87,6 +113,8 @@ Se o cursor ficar preso na janela do espelhamento, pressione `Alt` ou a tecla `W
 - **Manter acordado**: evita que o celular apague a tela durante o uso.
 - **Tela cheia**: abre o espelhamento em tela cheia.
 - **Destino no celular**: pasta usada pelo botão **Enviar arquivo**.
+- **Via rede/Wi-Fi**: inicia o espelhamento usando ADB por TCP/IP.
+- **IP:porta**: endereço do celular na rede, como `192.168.1.50:5555`.
 
 ## Problemas comuns
 
@@ -108,6 +136,14 @@ Marque **Modo jogo** e inicie o espelhamento novamente. O jogo também precisa t
 ### O espelhamento está travando
 
 Use tamanho máximo `720` e bitrate `4M` ou `2M`.
+
+### A conexão via rede não funciona
+
+- Confirme que PC e celular estão na mesma rede.
+- Faça a primeira configuração com o cabo USB.
+- Clique em **Preparar rede** novamente depois de reiniciar o celular.
+- Verifique se o IP do celular mudou.
+- Algumas redes públicas ou de convidados bloqueiam comunicação entre dispositivos.
 
 ### O arquivo não aparece no celular
 
