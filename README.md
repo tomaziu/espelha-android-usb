@@ -25,17 +25,35 @@ O projeto usa [`scrcpy`](https://github.com/Genymobile/scrcpy) e `adb` por baixo
 
 > iPhone não é suportado para controle completo via USB com mouse usando `adb/scrcpy`.
 
-## Como usar
+## Instalação
 
-1. Baixe ou clone este repositório.
-2. Abra `Abrir-Espelhamento.bat`.
-3. Clique em **Baixar/atualizar scrcpy**.
-4. No Android, ative **Opções do desenvolvedor**.
-5. Ative **Depuração USB**.
-6. Conecte o celular no PC por USB.
-7. Quando aparecer a mensagem no celular, toque em **Permitir depuração USB**.
-8. Clique em **Verificar celular**.
-9. Clique em **Iniciar espelhamento**.
+1. Baixe o ZIP do repositório ou clone com Git:
+
+```bash
+git clone https://github.com/tomaziu/espelha-android-usb.git
+cd espelha-android-usb
+```
+
+2. Confirme que o Python está instalado:
+
+```bash
+python --version
+```
+
+3. Abra `Abrir-Espelhamento.bat`.
+4. Clique em **Baixar/atualizar scrcpy** para baixar as ferramentas necessárias.
+
+As pastas `tools/` e `downloads/` são criadas automaticamente e não precisam ser versionadas.
+
+## Uso rápido
+
+1. Abra `Abrir-Espelhamento.bat`.
+2. No Android, ative **Opções do desenvolvedor**.
+3. Ative **Depuração USB**.
+4. Conecte o celular no PC por USB.
+5. Quando aparecer a mensagem no celular, toque em **Permitir depuração USB**.
+6. Clique em **Verificar celular**.
+7. Clique em **Iniciar espelhamento**.
 
 Com **Somente ver** desligado, o controle por mouse e teclado fica ativo.
 
@@ -156,10 +174,57 @@ Use tamanho máximo `720` e bitrate `4M` ou `2M`.
 
 - `phone_mirror.py`: aplicativo principal em Python/Tkinter.
 - `Abrir-Espelhamento.bat`: atalho para abrir o app no Windows.
+- `run_tests.bat`: atalho para compilar o app e rodar os testes.
+- `tests/`: testes unitários das funções auxiliares.
+- `.github/workflows/ci.yml`: workflow de CI no GitHub Actions.
 - `tools/`: pasta criada automaticamente para guardar o `scrcpy` baixado.
 - `downloads/`: pasta criada automaticamente para guardar downloads temporários.
 
 As pastas `tools/` e `downloads/` não entram no Git, porque podem conter arquivos grandes baixados automaticamente.
+
+## Desenvolvimento
+
+O projeto não precisa de dependências externas de Python para rodar os testes atuais. A interface usa `tkinter`, que já vem com a instalação padrão do Python no Windows.
+
+Fluxo sugerido:
+
+1. Crie uma branch para sua mudança.
+2. Faça alterações pequenas e focadas.
+3. Atualize o README quando mudar o comportamento do app.
+4. Rode os testes antes de abrir um pull request.
+
+## Testes
+
+Para rodar tudo no Windows:
+
+```bat
+run_tests.bat
+```
+
+Ou manualmente:
+
+```bash
+python -m py_compile phone_mirror.py
+python -m unittest discover -s tests -v
+```
+
+Os testes cobrem funções que não dependem de um celular conectado, como parsing do ADB, normalização de caminhos Android, normalização de IP/porta e extração segura de ZIP.
+
+## Contribuição
+
+Contribuições são bem-vindas. Antes de abrir um pull request, leia `CONTRIBUTING.md`, rode os testes e descreva claramente o problema resolvido.
+
+Para bugs, inclua:
+
+- versão do Windows;
+- versão do Python;
+- modelo do celular;
+- saída do registro do app;
+- passos para reproduzir.
+
+## Segurança
+
+Não abra vulnerabilidades como issues públicas. Use as instruções de `SECURITY.md` para reportar problemas de segurança.
 
 ## Licença
 

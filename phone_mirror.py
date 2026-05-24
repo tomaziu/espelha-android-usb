@@ -101,6 +101,8 @@ def normalize_android_dir(value: str) -> str:
     target = value.strip().replace("\\", "/")
     if not target:
         target = DEFAULT_PUSH_TARGET
+    if target.lower().startswith("sdcard/"):
+        target = f"/{target}"
     if not target.startswith("/"):
         target = f"/sdcard/{target.lstrip('/')}"
     if not target.endswith("/"):
